@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SECRET DRAW</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Space+Mono:wght@400;700&display=swap">
+<style>
+:root{--bg:#f4efe6;--ink:#000;--card:#fff;--a:#ffe600;--b:#ff2e93;--c:#00e5ff;--g:#39ff14;--on:#000;color-scheme:light dark}
+@media (prefers-color-scheme:dark){:root{--bg:#101010;--ink:#fff;--card:#1b1b1b}}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Space Mono",ui-monospace,Menlo,monospace;font-size:17px;line-height:1.45;
+background-image:repeating-linear-gradient(45deg,transparent 0 22px,color-mix(in srgb,var(--ink) 7%,transparent) 22px 24px)}
+.wrap{max-width:760px;margin:0 auto;padding:20px 16px 60px}
+h1,h2,.btn{font-family:"Archivo Black",Impact,"Arial Black",sans-serif;text-transform:uppercase;margin:0}
+h1{font-size:clamp(46px,14vw,104px);line-height:.88;letter-spacing:-2px;background:var(--a);color:var(--on);border:6px solid var(--ink);box-shadow:12px 12px 0 var(--b);padding:14px 16px;transform:rotate(-1.5deg);margin-bottom:34px}
+h1 span{display:block;background:var(--on);color:var(--a);padding:0 8px;width:fit-content;margin-top:6px}
+.ticker{background:var(--ink);color:var(--bg);font-weight:700;padding:6px 10px;margin:0 -16px 26px;white-space:nowrap;overflow:hidden;text-transform:uppercase;letter-spacing:2px;font-size:14px}
+.card{background:var(--card);border:6px solid var(--ink);box-shadow:10px 10px 0 var(--ink);padding:22px;margin-bottom:34px}
+.card.c1{box-shadow:10px 10px 0 var(--c)}.card.c2{box-shadow:10px 10px 0 var(--g)}.card.c3{background:var(--b);color:var(--on)}
+h2{font-size:clamp(26px,7vw,40px);line-height:1;margin-bottom:12px}
+p{margin:0 0 14px;font-weight:700}
+input{width:100%;font:700 24px "Space Mono",monospace;padding:14px;border:5px solid var(--ink);background:var(--card);color:var(--ink);margin-bottom:16px;border-radius:0}
+input:focus{outline:none;background:var(--a);color:var(--on)}
+.btn{display:block;width:100%;font-size:clamp(22px,6vw,32px);padding:16px;background:var(--a);color:var(--on);border:5px solid var(--ink);box-shadow:7px 7px 0 var(--ink);cursor:pointer;border-radius:0}
+.btn:hover{background:var(--c)}.btn:active{transform:translate(7px,7px);box-shadow:none}
+.btn:disabled{opacity:.5;cursor:wait}
+.btn.sm{display:inline-block;width:auto;font-size:16px;padding:8px 14px;background:var(--card);color:var(--ink);box-shadow:4px 4px 0 var(--ink)}
+.count{display:inline-block;background:var(--ink);color:var(--bg);padding:2px 12px;font-family:"Archivo Black",Impact,sans-serif;font-size:1.4em}
+.reveal{font-family:"Archivo Black",Impact,sans-serif;font-size:clamp(40px,13vw,92px);line-height:.95;text-transform:uppercase;word-break:break-word;background:var(--card);color:var(--ink);border:5px solid var(--ink);padding:14px;margin:12px 0 16px}
+.hidden-bar{background:var(--ink);color:var(--ink);user-select:none}
+.err{background:var(--on);color:var(--a);padding:10px;margin-bottom:30px;font-weight:700;border:4px solid var(--ink)}
+small{display:block;font-weight:700;opacity:.85}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="ticker">★ SECRET DRAW ★ NO REPEATS ★ NO SELF-PICKS ★ SHHH ★</div>
+<h1>SECRET<span>DRAW!!</span></h1>
+<div id="app"><div class="card"><h2>LOADING…</h2></div></div>
+</div>
+<script type="module">
+import {initializeApp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import {getAuth,signInAnonymously,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import {getFirestore,collection,doc,getDoc,getDocs,setDoc,writeBatch,onSnapshot,serverTimestamp} from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import {firebaseConfig} from "./config.js";
+
+const app=document.getElementById('app');
+const S={uid:null,n:1,me:null,players:[],taken:[],mine:null,shown:false,busy:false,err:'',ready:false,host:false,hostOpen:false};
+let ROUND='r1',unsubs=[];
+const esc=t=>{const d=document.createElement('div');d.textContent=t;return d.innerHTML};
+
+let db;
+const col=n=>collection(db,'rounds',ROUND,n);
+const dref=(n,id)=>doc(db,'rounds',ROUND,n,id);
+
+function render(){
+ let h='';
+ if(!S.ready){app.innerHTML='<div class="card"><h2>LOADING…</h2></div>';return}
+ if(!S.me){
+  h='<div class="card"><h2>1. WHO ARE YOU?</h2><p>Type your name. It goes into the secret pot.</p><input id="nm" maxlength="30" placeholder="YOUR NAME" autocomplete="off"><button class="btn" id="join">JOIN THE POT</button></div>';
+ }else if(!S.mine){
+  const left=S.players.filter(id=>id!==S.uid&&!S.taken.includes(id)).length;
+  h='<div class="card c1"><h2>2. DRAW!</h2><p>Hi '+esc(S.me)+'. <span class="count">'+S.players.length+'</span> in the pot, <span class="count">'+left+'</span> still unclaimed. Wait until everyone has joined before drawing.</p><button class="btn" id="draw"'+(S.busy?' disabled':'')+'>'+(S.busy?'DRAWING…':'DRAW A NAME')+'</button></div>';
+ }else{
+  h='<div class="card c2"><h2>YOUR TARGET</h2><p>Keep it secret. Only this device can see it.</p><div class="reveal'+(S.shown?'':' hidden-bar')+'">'+(S.shown?esc(S.mine):'████████')+'</div><button class="btn sm" id="tog">'+(S.shown?'HIDE IT':'REVEAL')+'</button></div>';
+ }
+ if(S.err)h='<div class="err">'+esc(S.err)+'</div>'+h;
+ h+='<div class="card" style="box-shadow:none"><h2 style="font-size:22px">HOST</h2>'+(S.hostOpen||S.host?'<p>Round '+S.n+'. Starting a new round empties the pot for everyone.</p>'+(S.host?'':'<input id="hp" type="password" placeholder="HOST PASSWORD" autocomplete="off">')+'<button class="btn sm" id="reset">NEW ROUND</button>':'<button class="btn sm" id="hopen">I AM THE HOST</button>')+'</div>';
+ h+='<small>Names stay hidden in the interface. Only counts are shown.</small>';
+ app.innerHTML=h;
+ const $=id=>document.getElementById(id);
+ if($('join'))$('join').onclick=join;
+ if($('draw'))$('draw').onclick=draw;
+ if($('tog'))$('tog').onclick=()=>{S.shown=!S.shown;render()};
+ if($('hopen'))$('hopen').onclick=()=>{S.hostOpen=true;render()};
+ if($('reset'))$('reset').onclick=resetRound;
+ if($('nm'))$('nm').onkeydown=e=>{if(e.key==='Enter')join()};
+}
+
+async function join(){
+ const v=(document.getElementById('nm').value||'').trim();
+ if(!v){S.err='Name required.';render();return}
+ S.err='';
+ try{await setDoc(dref('players',S.uid),{name:v})}catch(e){console.error(e);S.err='Could not join. Check the Firebase setup.';render()}
+}
+
+async function draw(){
+ if(S.busy)return;S.busy=true;S.err='';render();
+ try{
+  let done=false;
+  for(let i=0;i<10&&!done;i++){
+   const [ps,ts,ds]=await Promise.all([getDocs(col('players')),getDocs(col('taken')),getDocs(col('drawn'))]);
+   const players=ps.docs.map(d=>d.id),taken=new Set(ts.docs.map(d=>d.id)),drawn=new Set(ds.docs.map(d=>d.id));
+   const remGivers=players.filter(id=>id!==S.uid&&!drawn.has(id));
+   // candidates: not me, not already claimed, and don't leave the last giver with only themselves
+   const c=players.filter(p=>{
+    if(p===S.uid||taken.has(p))return false;
+    const remTargets=players.filter(id=>!taken.has(id)&&id!==p);
+    return !(remGivers.length===1&&remTargets.length===1&&remTargets[0]===remGivers[0]);
+   });
+   if(!c.length){S.err=players.length<2?'Not enough players yet.':'No one is available for you right now. Wait for more players to join.';break}
+   const pick=c[Math.floor(Math.random()*c.length)];
+   try{
+    const b=writeBatch(db);
+    b.set(dref('assignments',S.uid),{targetId:pick});
+    b.set(dref('taken',pick),{t:serverTimestamp()});
+    b.set(dref('drawn',S.uid),{t:serverTimestamp()});
+    await b.commit(); // atomic; fails if someone claimed `pick` first
+    const nm=await getDoc(dref('players',pick));
+    S.mine=nm.exists()?nm.data().name:'?';S.shown=false;done=true;
+   }catch(e){console.warn('claim failed, retrying',e)}
+  }
+  if(!done&&!S.err)S.err='Could not draw. Try again.';
+ }catch(e){console.error(e);S.err='Something broke. Try again.'}
+ S.busy=false;render();
+}
+
+async function resetRound(){
+ const pw=document.getElementById('hp');
+ if(!confirm('Start a NEW ROUND? Everyone goes back to entering names.'))return;
+ S.err='';
+ try{
+  if(!S.host){
+   if(!pw||!pw.value){S.err='Enter the host password.';render();return}
+   await setDoc(doc(db,'hosts',S.uid),{pw:pw.value});S.host=true;
+  }
+  await setDoc(doc(db,'meta','round'),{n:S.n+1});
+ }catch(e){console.error(e);S.err='Reset refused. Wrong host password?';render()}
+}
+
+function listen(){
+ unsubs.forEach(u=>{try{u()}catch(e){}});unsubs=[];
+ S.players=[];S.taken=[];S.me=null;S.mine=null;S.shown=false;
+ unsubs.push(onSnapshot(col('players'),s=>{
+  S.players=s.docs.map(d=>d.id);
+  const m=s.docs.find(d=>d.id===S.uid);S.me=m?m.data().name:null;
+  S.ready=true;render();
+ },e=>{console.error(e);S.err='Cannot read data. Check Firestore rules and config.';S.ready=true;render()}));
+ unsubs.push(onSnapshot(col('taken'),s=>{S.taken=s.docs.map(d=>d.id);render()},()=>{}));
+ loadMine().then(render);
+}
+
+async function loadMine(){
+ try{
+  const a=await getDoc(dref('assignments',S.uid));
+  if(a.exists()){const n=await getDoc(dref('players',a.data().targetId));S.mine=n.exists()?n.data().name:'?'}
+ }catch(e){console.error(e)}
+}
+
+async function start(){
+ try{
+  const fb=initializeApp(firebaseConfig);db=getFirestore(fb);
+  const auth=getAuth(fb);
+  onAuthStateChanged(auth,async u=>{
+   if(!u){await signInAnonymously(auth);return}
+   S.uid=u.uid;
+   onSnapshot(doc(db,'meta','round'),snap=>{
+    const n=(snap.exists()&&snap.data().n)||1;
+    if(n!==S.n||!unsubs.length){S.n=n;ROUND='r'+n;listen()}
+   },e=>{console.error(e);S.err='Cannot read data. Check Firestore rules and config.';S.ready=true;render()});
+  });
+ }catch(e){console.error(e);S.err='Firebase failed to start. Check config.js.';S.ready=true;render()}
+}
+render();start();
+</script>
+</body>
+</html>
