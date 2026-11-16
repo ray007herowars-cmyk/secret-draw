@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{db}/documents {
+    match /rounds/{round} {
+
+      // The pot. Anyone signed in may add THEMSELVES once (name only). Never editable.
+      match /players/{uid} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['name'])
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 30;
+      }
+
+      // Marker: "this player has drawn" (not WHO they drew).
+      match /drawn/{uid} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['t']);
+      }
+
+      // Marker: "this player has been claimed" (not by whom).
+      // create-only => a second claim on the same player is rejected => no repeats.
+      match /taken/{target} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+          && target != request.auth.uid
+          && request.resource.data.keys().hasOnly(['t'])
+          && getAfter(/databases/$(db)/documents/rounds/$(round)/assignments/$(request.auth.uid)).data.targetId == target;
+      }
+
+      // The secret: only the giver can read it; one per player; never to themselves.
+      match /assignments/{uid} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow create: if request.auth != null
+          && request.auth.uid == uid
+          && request.resource.data.keys().hasOnly(['targetId'])
+          && request.resource.data.targetId != uid
+          && exists(/databases/$(db)/documents/rounds/$(round)/players/$(uid))
+          && exists(/databases/$(db)/documents/rounds/$(round)/players/$(request.resource.data.targetId));
+      }
+    }
+  }
+}
